@@ -211,7 +211,7 @@ XArgv(PyObject *dummy, PyObject *args) {
     PyObject *string_object;
     string_object = PyList_GetItem(list_object, i); /* borrowed ref */
 /* TODO do it properly, catch exceptions for fancy Unicode symbols */
-    argv[i] = PyUnicode_AsUTF8(string_object);    /* does not increase
+    argv[i] = (char*)PyUnicode_AsUTF8(string_object); /* does not increase
                                                      ref count */
   }
   ret = dcc_x_argv(ifd, "ARGC", "ARGV", argv);
@@ -318,7 +318,7 @@ static PyObject *
 Realpath(PyObject *dummy, PyObject *args) {
   const char *in;
 
-  /* We explictly allocate memory for the output 'resolved' of 'realpath' --
+  /* We explicitly allocate memory for the output 'resolved' of 'realpath' --
      otherwise, some systems will make trouble because they do not accept
      passing the second argument NULL (as GNU does) for automatic buffer
      allocation. The glib function 'realpath' comes with the warning to not use

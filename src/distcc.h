@@ -190,6 +190,7 @@ int dcc_support_masquerade(char *argv[], char *progname, int *);
 int dcc_enjoyed_host(const struct dcc_hostdef *host);
 int dcc_disliked_host(const struct dcc_hostdef *host);
 int dcc_remove_disliked(struct dcc_hostdef **hostlist);
+int dcc_backoff_is_enabled(void);
 
 
 
@@ -262,6 +263,7 @@ int dcc_expand_preprocessor_options(char ***argv_ptr);
 /* argutil.c */
 unsigned int dcc_argv_len(char **a);
 int dcc_argv_search(char **a, const char *);
+int dcc_argv_startswith(char **a, const char *);
 int dcc_copy_argv(char **argv, char ***out_argv, int extra_args);
 int dcc_argv_append(char **argv, char *toadd);
 char *dcc_argv_tostr(char **a);

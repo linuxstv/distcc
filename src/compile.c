@@ -72,6 +72,21 @@ int dcc_scan_includes = 0;
 static const char *const include_server_port_suffix = "/socket";
 static const char *const discrepancy_suffix = "/discrepancy_counter";
 
+static void bad_host(struct dcc_hostdef *host, int *cpu_lock_fd , int *local_cpu_lock_fd)
+{
+   if (host)
+       dcc_disliked_host(host);
+
+   if (*cpu_lock_fd != -1) {
+       dcc_unlock(*cpu_lock_fd);
+       *cpu_lock_fd = -1;
+   }
+   if (*local_cpu_lock_fd != -1) {
+       dcc_unlock(*local_cpu_lock_fd);
+       *local_cpu_lock_fd = -1;
+   }
+}
+
 static int dcc_get_max_discrepancies_before_demotion(void)
 {
     /* Warning: the default setting here should have the same value as in the
@@ -534,7 +549,7 @@ static void dcc_rewrite_generic_compiler(char **argv)
 static void dcc_add_clang_target(char **argv)
 {
         /* defined by autoheader */
-    const char *target = GNU_HOST;
+    const char *target = NATIVE_COMPILER_TRIPLE;
 
     if (strcmp(argv[0], "clang") == 0 || strncmp(argv[0], "clang-", strlen("clang-")) == 0 ||
         strcmp(argv[0], "clang++") == 0 || strncmp(argv[0], "clang++-", strlen("clang++-")) == 0)
@@ -542,7 +557,12 @@ static void dcc_add_clang_target(char **argv)
     else
         return;
 
+    /* -target aarch64-linux-gnu */
     if (dcc_argv_search(argv, "-target"))
+        return;
+
+    /* --target=aarch64-linux-gnu */
+    if (dcc_argv_startswith(argv, "--target"))
         return;
 
     rs_log_info("Adding '-target %s' to support clang cross-compilation.",
@@ -557,9 +577,10 @@ static void dcc_add_clang_target(char **argv)
 static int dcc_gcc_rewrite_fqn(char **argv)
 {
         /* defined by autoheader */
-    const char *target_with_vendor = GNU_HOST;
+    const char *target_with_vendor = NATIVE_COMPILER_TRIPLE;
     char *newcmd, *t, *path;
     int pathlen = 0;
+    int newcmd_len = 0;
 
     if (strcmp(argv[0], "gcc") == 0 || strncmp(argv[0], "gcc-", strlen("gcc-")) == 0 ||
         strcmp(argv[0], "g++") == 0 || strncmp(argv[0], "g++-", strlen("g++-")) == 0)
@@ -568,15 +589,13 @@ static int dcc_gcc_rewrite_fqn(char **argv)
         return -ENOENT;
 
 
-    newcmd = malloc(strlen(target_with_vendor) + 1 + strlen(argv[0] + 1));
+    newcmd_len = strlen(target_with_vendor) + 1 + strlen(argv[0]) + 1;
+    newcmd = malloc(newcmd_len);
     if (!newcmd)
         return -ENOMEM;
+    memset(newcmd, 0, newcmd_len);
 
-    if ((t = strstr(target_with_vendor, "-pc-"))) {
-        strncpy(newcmd, target_with_vendor, t - target_with_vendor);
-        strcat(newcmd, t + strlen("-pc"));
-    } else
-        strcpy(newcmd, target_with_vendor);
+    strcpy(newcmd, target_with_vendor);
 
 
     strcat(newcmd, "-");
@@ -611,6 +630,18 @@ static int dcc_gcc_rewrite_fqn(char **argv)
     } while ((path += pathlen + 1));
     free(newcmd);
     return -ENOENT;
+}
+
+static int dcc_get_max_retries(void)
+{
+    if (dcc_backoff_is_enabled()) {
+        /* eventually distcc will either find a suitable host or mark
+	 * all hosts as faulty (and fallback to a local compilation)
+	 */
+	return 0; /* no limit */
+    } else {
+	return 3; /* somewhat arbitrary */
+    }
 }
 
 /**
@@ -669,9 +700,12 @@ dcc_build_somewhere(char *argv[],
     int cpu_lock_fd = -1, local_cpu_lock_fd = -1;
     int ret;
     int remote_ret = 0;
+    int retry_count = 0, max_retries;
     struct dcc_hostdef *host = NULL;
     char *discrepancy_filename = NULL;
     char **new_argv;
+
+    max_retries = dcc_get_max_retries();
 
     if ((ret = dcc_expand_preprocessor_options(&argv)) != 0)
         goto clean_up;
@@ -724,6 +758,7 @@ dcc_build_somewhere(char *argv[],
 
     /* Choose the distcc server host (which could be either a remote
      * host or localhost) and acquire the lock for it.  */
+  choose_host:
     if ((ret = dcc_pick_host_from_list_and_lock_it(&host, &cpu_lock_fd)) != 0) {
         /* Doesn't happen at the moment: all failures are masked by
            returning localhost. */
@@ -821,8 +856,15 @@ dcc_build_somewhere(char *argv[],
 
         /* dcc_compile_remote() already unlocked local_cpu_lock_fd. */
         local_cpu_lock_fd = -1;
-
-        goto fallback;
+        bad_host(host, &cpu_lock_fd, &local_cpu_lock_fd);
+        retry_count++;
+        if (max_retries == 0 || retry_count < max_retries)
+            goto choose_host;
+        else {
+            rs_log_warning("Couldn't find a host in %d attempts, retrying locally",
+                           retry_count);
+            goto fallback;
+	}
     }
     /* dcc_compile_remote() already unlocked local_cpu_lock_fd. */
     local_cpu_lock_fd = -1;
@@ -886,17 +928,7 @@ dcc_build_somewhere(char *argv[],
 
 
   fallback:
-    if (host)
-        dcc_disliked_host(host);
-
-    if (cpu_lock_fd != -1) {
-        dcc_unlock(cpu_lock_fd);
-        cpu_lock_fd = -1;
-    }
-    if (local_cpu_lock_fd != -1) {
-        dcc_unlock(local_cpu_lock_fd);
-        local_cpu_lock_fd = -1;
-    }
+    bad_host(host, &cpu_lock_fd, &local_cpu_lock_fd);
 
     if (!dcc_getenv_bool("DISTCC_FALLBACK", 1)) {
         rs_log_error("failed to distribute and fallbacks are disabled");

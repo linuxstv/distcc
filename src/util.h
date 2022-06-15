@@ -24,6 +24,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdint.h>
 
 /* util.c */
 int dcc_timecmp(struct timeval a, struct timeval b);
@@ -63,4 +64,4 @@ int dcc_tokenize_string(const char *in, char ***argv_ptr);
 ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 #endif
 
-int sd_is_socket(int fd, int family, int type, int listening);
+int not_sd_is_socket(int fd, int family, int type, int listening);

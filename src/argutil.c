@@ -67,6 +67,19 @@ int dcc_argv_search(char **a,
 }
 
 
+/**
+ * Return true if argv contains argument starting with needle.
+ */
+int dcc_argv_startswith(char **a,
+                        const char *needle)
+{
+    size_t needle_len = strlen(needle);
+    for (; *a; a++)
+        if (!strncmp(*a, needle, needle_len))
+            return 1;
+    return 0;
+}
+
 unsigned int dcc_argv_len(char **a)
 {
     unsigned int i;
@@ -150,7 +163,7 @@ char *dcc_argv_tostr(char **a)
         /* kind of half-assed quoting; won't handle strings containing
          * quotes properly, but good enough for debug messages for the
          * moment. */
-        int needs_quotes = (strpbrk(a[i], " \t\n\"\';") != NULL);
+        int needs_quotes = !*a[i] || (strpbrk(a[i], " \t\n\"\';") != NULL);
         if (i)
             *ss++ = ' ';
         if (needs_quotes)
